@@ -7,6 +7,8 @@
 library(targets)
 library(tarchetypes)
 library(here)
+library(tibble)
+library(tidyr)
 # library(tarchetypes) # Load other packages as needed.
 
 # Set target options:
@@ -54,43 +56,76 @@ tar_source()
 # Define the pipeline
 list(
   # Target 1: Track the input data file.
-  # tar_file() tells targets to monitor this file for changes.
   tar_file(
     raw_data_file,
     here("data", "2025-08-MD.csv")
   ),
 
   # Target 2: Clean the raw data.
-  # This target depends on raw_data_file. It will only rerun if the file changes.
   tar_target(
     cleaned_long_data,
     clean_data(raw_data_file)
   ),
 
   # Target 3: Pivot the data to wide format.
-  # This depends on the long-format cleaned data.
   tar_target(
     cleaned_wide_data,
     pivot_cleaned_data_wide(cleaned_long_data)
   ),
 
-  # Target 4: Fit the PCA model.
-  # This depends on the wide data.
-  tar_target(
-    fitted_pca_model,
-    fit_model_pca(cleaned_wide_data)
+  # Target 4: Fit PCA models with different specifications using tar_map
+  tar_map(
+    values = expand_grid(
+      num_comp = c(3, 5, 8, 10),
+      neighbors = c(5, 10)
+    ),
+    names = c("num_comp", "neighbors"),
+    tar_target(
+      fitted_pca_model,
+      fit_model_pca(cleaned_wide_data, num_comp, neighbors)
+    ),
+    tar_target(
+      variance_chart,
+      make_chart_variance_pcs(fitted_pca_model)
+    )
   ),
 
-  # Target 5: Create the variance chart object.
-  # This depends on the fitted PCA model.
-  tar_target(
-    variance_chart,
-    make_chart_variance_pcs(fitted_pca_model)
+  # Target 5: Combine all variance charts into a named list
+  tar_combine(
+    all_variance_charts,
+    tar_map(
+      values = expand_grid(
+        num_comp = c(3, 5, 8, 10),
+        neighbors = c(5, 10)
+      ),
+      names = c("num_comp", "neighbors"),
+      tar_target(
+        variance_chart,
+        make_chart_variance_pcs(fitted_pca_model)
+      )
+    )$variance_chart,
+    command = {
+      setNames(
+        list(!!!.x),
+        c(
+          "PC3_K5", "PC3_K10", "PC5_K5", "PC5_K10",
+          "PC8_K5", "PC8_K10", "PC10_K5", "PC10_K10"
+        )
+      )
+    }
   ),
 
-  # Target 6: Save the variance chart to a file (optional)
+  # Target 6: Save just a few selected charts
   tar_file(
-    variance_chart_file,
-    save_chart(variance_chart, here("outputs", "variance_chart.png"))
+    variance_chart_pc5_k5_file,
+    save_chart(variance_chart_5_5, here("outputs", "variance_chart_PC5_K5.png"))
+  ),
+  tar_file(
+    variance_chart_pc8_k5_file,
+    save_chart(variance_chart_8_5, here("outputs", "variance_chart_PC8_K5.png"))
+  ),
+  tar_file(
+    variance_chart_pc10_k10_file,
+    save_chart(variance_chart_10_10, here("outputs", "variance_chart_PC10_K10.png"))
   )
 )
